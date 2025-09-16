@@ -1,22 +1,26 @@
-"""
-Google Cloud Speech-to-Text Modul
+"""Google Cloud Speech-to-Text Modul
+
+Vereinfachte Variante: Es wird ausschließlich die Umgebungsvariable
+`GOOGLE_APPLICATION_CREDENTIALS` erwartet, die auf die Service-Account
+JSON-Datei zeigt. Keine alternative Inline-JSON Logik mehr.
 """
 
 from google.cloud import speech
-import numpy as np
 from config import GOOGLE_APPLICATION_CREDENTIALS
 import os
 
-# Setze die Umgebungsvariable für die Credentials
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_APPLICATION_CREDENTIALS
+# Stellt sicher, dass die Variable für die Google SDKs verfügbar ist
+if GOOGLE_APPLICATION_CREDENTIALS:
+    if os.path.exists(GOOGLE_APPLICATION_CREDENTIALS):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_APPLICATION_CREDENTIALS
+    else:
+        raise RuntimeError(
+            f"GOOGLE_APPLICATION_CREDENTIALS zeigt auf keine existierende Datei: {GOOGLE_APPLICATION_CREDENTIALS}"
+        )
+else:
+    raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS ist nicht gesetzt")
 
-"""
-Google Speech-to-Text Modul: Wandelt Audio in Text um.
-"""
-
-import os
-from google.cloud import speech
-import numpy as np
+"""Google Speech-to-Text: Wandelt Audio (int16 numpy array) in Text um."""
 
 def transcribe_audio(audio_data, sample_rate=16000):
     """

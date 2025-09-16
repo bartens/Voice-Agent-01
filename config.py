@@ -8,12 +8,11 @@ import os
 # Kein Fallback / kein Hardcoding hier, damit kein versehentliches Commit von Secrets passiert.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Pfad zur Google Credentials Datei aus Umgebungsvariable
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
 # Virtuelle Audiokabel (aus Screenshot)
-SPEAKER_DEVICE_NAME = 8 # 6
-MIC_DEVICE_NAME = 4 # 1
+SPEAKER_DEVICE_NAME = 6 # 8
+MIC_DEVICE_NAME = 1 # 4
 
 # Gemini Modell (optional per Umgebungsvariable überschreibbar)
 # Empfohlene Werte (Stand 2025): "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-latest"

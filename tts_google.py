@@ -14,12 +14,17 @@ from config import (
 )
 import os
 
-# Setze die Umgebungsvariable für die Credentials
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_APPLICATION_CREDENTIALS
+if GOOGLE_APPLICATION_CREDENTIALS:
+    if os.path.exists(GOOGLE_APPLICATION_CREDENTIALS):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_APPLICATION_CREDENTIALS
+    else:
+        raise RuntimeError(
+            f"GOOGLE_APPLICATION_CREDENTIALS zeigt auf keine existierende Datei: {GOOGLE_APPLICATION_CREDENTIALS}"
+        )
+else:
+    raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS ist nicht gesetzt")
 
-"""
-Google Text-to-Speech Modul: Wandelt Text in Audio um.
-"""
+"""Google Text-to-Speech Modul: Wandelt Text in Audio um."""
 
 import numpy as np
 

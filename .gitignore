@@ -59,3 +59,4 @@ config.local.py
 # IDE workspace
 *.code-workspace
 
+service-account-key.json
