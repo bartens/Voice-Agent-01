@@ -1,0 +1,61 @@
+# Python Standard
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+
+# Virtual Environments
+venv/
+.env/
+.env*/
+.venv/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logs / Temp
+*.log
+logs/
+*.tmp
+*.bak
+
+# Bytecode dumps
+profile.prof
+
+# Credentials / Secrets
+client_secret.json
+*.token.json
+*.credentials.json
+
+# Project Specific
+# Audio recordings / intermediate captures
+*.wav
+*.raw
+recordings/
+
+# Token / OAuth generated
+*.pickle
+
+auth/
+
+# Caches
+.cache/
+.mypy_cache/
+pytest_cache/
+
+# Generated artifacts
+output/
+
+# Local config overrides
+local_settings.py
+config.local.py
+
+# IDE workspace
+*.code-workspace
+
