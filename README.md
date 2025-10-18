@@ -87,6 +87,7 @@ $env:GOOGLE_OAUTH_TOKEN='token.json'
 $env:CALENDAR_ID='primary'              # oder explizite ID
 $env:CALENDAR_DEBUG='1'                 # Debug Logging aktiv
 $env:GOOGLE_CALENDAR_SCOPES='https://www.googleapis.com/auth/calendar'
+$env:SPEECH_TRACE='1'                   # Erweiterte Sprach-/Entscheidungs-Traces (Variante A)
 ```
 
 ### Fehlerszenarien
@@ -114,6 +115,20 @@ $env:GOOGLE_CALENDAR_SCOPES='https://www.googleapis.com/auth/calendar'
 - Caching der FreeBusy Ergebnisse für kurze Zeitfenster
 - UI (Streamlit) für visuelle Terminübersicht
 - ICS Export / Mail Versand
+
+### Diagnose Sprach-Assistent (Variante A)
+Aktiviere detaillierte Entscheidungs- und Event-Trace-Ausgaben:
+```powershell
+$env:SPEECH_TRACE='1'
+python speech_calendar_assistant.py
+```
+Beobachte Konsolenzeilen mit Präfix `[TRACE:SPEECH]` für:
+- VAD Start/Ende, Segmentlängen
+- Erkanntes STT Transkript & Parser Treffer
+- Funktion Calls (Name + Parameter) und Event IDs
+- Fehlerursachen bei direkter oder modellgestützter Erstellung
+
+Deaktivieren durch `Remove-Item Env:SPEECH_TRACE` oder neues Terminal ohne Variable.
 
 ---
 

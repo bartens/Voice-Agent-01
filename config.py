@@ -11,8 +11,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
 # Virtuelle Audiokabel (aus Screenshot)
-SPEAKER_DEVICE_NAME = 6 # 8
-MIC_DEVICE_NAME = 1 # 4
+SPEAKER_DEVICE_NAME = 8 # 6
+MIC_DEVICE_NAME = 4 # 1
 
 # Gemini Modell (optional per Umgebungsvariable überschreibbar)
 # Empfohlene Werte (Stand 2025): "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-latest"

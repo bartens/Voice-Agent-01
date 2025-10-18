@@ -17,6 +17,7 @@ from text_sanitize import sanitize_output
 from date_utils import adjust_dates_if_year_missing
 import re
 from datetime import datetime, timedelta
+from session_context import init_session_time, get_session_date
 
 _MODEL: genai.GenerativeModel | None = None
 _CHAT = None
@@ -32,7 +33,10 @@ def _ensure_model():
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY nicht gesetzt.")
     genai.configure(api_key=GEMINI_API_KEY)
-    _MODEL = genai.GenerativeModel(GEMINI_MODEL_NAME, tools=TOOLS, system_instruction=SYSTEM_INSTRUCTION)
+    # Session Zeit einmalig initialisieren und Datum im System-Prompt nutzen
+    session_dt = init_session_time()
+    dynamic_instruction = SYSTEM_INSTRUCTION + f"\nHeutiges Datum (Europe/Berlin): {session_dt.date().isoformat()}."
+    _MODEL = genai.GenerativeModel(GEMINI_MODEL_NAME, tools=TOOLS, system_instruction=dynamic_instruction)
     _CHAT = _MODEL.start_chat()
     return
 

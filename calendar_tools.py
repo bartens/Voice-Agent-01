@@ -278,10 +278,27 @@ def create_calendar_event(summary: str,
 
     service = _get_service()
     debug = os.getenv("CALENDAR_DEBUG", "0").lower() in {"1","true","yes","on"}
+    trace = os.getenv("CALENDAR_TRACE", "0").lower() in {"1","true","yes","on"}
     cal_id = _resolve_calendar_id(service)
-    if debug:
-        print(f"[CAL][DEBUG] Insert -> cal={cal_id} {body['start']['dateTime']} - {body['end']['dateTime']} title='{summary}' timezone={timezone}")
-    created = _with_retries(lambda: service.events().insert(calendarId=cal_id, body=body, sendUpdates="all").execute())
+    if debug or trace:
+        print(f"[CAL][INSERT] calendarId={cal_id} title='{summary}' start={body['start']['dateTime']} end={body['end']['dateTime']} tz={timezone}")
+    if trace:
+        # Vorsicht: enthält evtl. Teilnehmer Emails.
+        try:
+            print("[CAL][TRACE] Request body:", body)
+        except Exception:
+            pass
+    try:
+        created = _with_retries(lambda: service.events().insert(calendarId=cal_id, body=body, sendUpdates="all").execute())
+    except HttpError as he:  # detailliertere Ausgabe bei TRACE
+        if trace:
+            status = getattr(he, 'status_code', None) or getattr(he.resp, 'status', None)
+            print(f"[CAL][TRACE][ERROR] HttpError status={status} reason={getattr(he, 'reason', None)} content={getattr(getattr(he, 'resp', None), 'data', None)}")
+        raise
+    except Exception as e:
+        if trace:
+            print(f"[CAL][TRACE][ERROR] Insert Exception: {e}")
+        raise
     # Optionale Verifikation (standardmäßig aktiv, kann via CALENDAR_SKIP_VERIFY=1 deaktiviert werden)
     if os.getenv("CALENDAR_SKIP_VERIFY", "0").lower() not in {"1","true","yes","on"}:
         try:
@@ -292,8 +309,8 @@ def create_calendar_event(summary: str,
             raise RuntimeError(f"Event-Erstellung unsicher – Fetch nach Insert fehlgeschlagen: {ve}")
     else:
         fetched = created
-    if debug:
-        print(f"[CAL][DEBUG] Created eventId={created.get('id')} link={created.get('htmlLink')}")
+    if debug or trace:
+        print(f"[CAL][CREATED] id={created.get('id')} link={created.get('htmlLink')} status={created.get('status')}" )
     result = {
         "eventId": created.get("id"),
         "htmlLink": created.get("htmlLink"),
@@ -563,15 +580,22 @@ def list_calendar_events(start_iso: str | None = None,
       include_cancelled: ob abgesagte Events einbezogen werden
     """
     from datetime import datetime, timedelta, timezone
-    now = datetime.now(timezone.utc)
+    # Verwende lokale Kalender-TZ für naive Zeiten damit frisch erstellte Events im sichtbaren Fenster landen.
+    local_tz_name = os.getenv("CALENDAR_LOCAL_TZ", "Europe/Berlin")
+    try:
+        from zoneinfo import ZoneInfo  # Python 3.9+
+        _local_tz = ZoneInfo(local_tz_name)
+    except Exception:
+        _local_tz = timezone.utc
+    now = datetime.now(_local_tz)
     def _parse(ts: str | None, default):
         if not ts:
             return default
         try:
-            # Unterstütze fehlendes 'Z' -> naive interpretieren als UTC
+            # Unterstütze fehlendes 'Z': Falls keine TZ -> als lokale Kalender-TZ interpretieren
             dt = datetime.fromisoformat(ts.replace('Z','+00:00'))
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=_local_tz)
             return dt
         except Exception:
             return default

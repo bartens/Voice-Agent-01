@@ -19,6 +19,15 @@ Start:
    python speech_calendar_assistant.py
 
 Hinweis: Das Modell kann Rückfragen stellen (fehlende Dauer, Datum etc.). Dann einfach Antwort sprechen.
+
+Variante A (aktuell fokussiert):
+    Ziel ist ausschließlich mehr Transparenz & Diagnostik (Instrumentation / Guard Rails),
+    KEINE tiefgreifende Stream-Architekturänderung. Maßnahmen:
+        - Zusätzliche Trace-/Entscheidungs-Logs für: VAD Segment (Länge, dBFS Peaks), STT Text, Parser Resultat,
+            Wahl des Branches (Direkterstellung vs. Modell), Function Call Extraktion, Event-Erstellungsergebnis.
+        - Aktivierung über neue ENV Variable `SPEECH_TRACE=1` (low overhead wenn nicht gesetzt).
+    Nicht Bestandteil von Variante A (nur evtl. später): Adaptive Chunklängen, halbduplex Streaming,
+    Zwischenhypothesen der STT, Interruptible TTS, dynamische Dauer-Fallbacks.
 """
 from __future__ import annotations
 import time
@@ -49,11 +58,36 @@ from calendar_tools import create_calendar_event, check_calendar_availability, s
 from personality import GREETING_TEXT, SYSTEM_PROMPT_CALENDAR
 from text_sanitize import sanitize_output
 from date_utils import adjust_dates_if_year_missing
+from session_context import init_session_time, get_session_date
 import re
 from datetime import datetime, timedelta, date
 
+# --- SPEECH TRACE -----------------------------------------------------------
+_SPEECH_TRACE_ENABLED = os.getenv("SPEECH_TRACE", "0") not in {"", "0", "false", "False", "FALSE"}
+
+def speech_trace(*parts):
+    """Leichtgewichtige Trace-Ausgabe (nur wenn SPEECH_TRACE=1 gesetzt)."""
+    if _SPEECH_TRACE_ENABLED:
+        try:
+            msg = " ".join(str(p) for p in parts)
+            print(f"[TRACE:SPEECH] {msg}")
+        except Exception:
+            pass
+
 STOP_WORDS = {"stop", "ende", "abbrechen", "quit"}
 TARGET_STT_SR = 16000
+
+PRE_CREATION_ANNOUNCEMENT = "Vielen Dank. Ich werde prüfen ob der Termin frei ist. Das kann einen Moment dauern."
+
+def _announce_pre_creation():
+    """Spielt die kurze Vorab-Ansage bevor ein Termin tatsächlich erstellt/geprüft wird.
+
+    Ziel: Dem Nutzer Feedback geben, dass jetzt Verfügbarkeits- / Insert-Operationen folgen.
+    """
+    try:
+        _tts_play(PRE_CREATION_ANNOUNCEMENT)
+    except Exception as e:
+        speech_trace("Pre-creation announcement TTS error", e)
 
 # Tool-Definition (wie gemini_function_chat, etwas DRY Duplikation für Isolation)
 TOOLS = [{
@@ -153,7 +187,7 @@ def _record_vad_segment(mic_id: int, wait_timeout: float | None = None) -> np.nd
     collected = []
     preroll = []
     started=False
-    silence_run=0
+    silence_run = 0
     start_wait = time.time()
     stream = sd.InputStream(device=mic_id, samplerate=sr, channels=ch, dtype='int16', blocksize=frame_len)
     with stream:
@@ -162,6 +196,8 @@ def _record_vad_segment(mic_id: int, wait_timeout: float | None = None) -> np.nd
             mono = _downmix_mono(block)
             mono16 = _resample(mono, sr, TARGET_STT_SR)
             peak = _peak_dbfs(mono16)
+            if _SPEECH_TRACE_ENABLED and idx % 10 == 0:
+                speech_trace(f"VAD frame={idx} peak={peak:.1f}dB started={started}")
             if not started:
                 preroll.append(block.copy())
                 if len(preroll) > preroll_frames:
@@ -170,9 +206,9 @@ def _record_vad_segment(mic_id: int, wait_timeout: float | None = None) -> np.nd
                     started=True
                     collected.extend(preroll)
                     collected.append(block.copy())
+                    speech_trace("VAD START detected", f"preroll_frames={len(preroll)}")
                 else:
                     if wait_timeout and (time.time()-start_wait) >= wait_timeout:
-                        # Return early (no speech yet) so caller can accumulate silence time
                         return np.zeros((0,), dtype=np.int16)
                     if (time.time()-start_wait) >= VAD_MAX_SECONDS:
                         return np.zeros((0,), dtype=np.int16)
@@ -183,13 +219,20 @@ def _record_vad_segment(mic_id: int, wait_timeout: float | None = None) -> np.nd
                 else:
                     silence_run = 0
                 dur = len(collected)*frame_len/sr
+                if _SPEECH_TRACE_ENABLED and idx % 25 == 0:
+                    speech_trace(f"VAD dur={dur:.2f}s silence_run={silence_run}")
                 if dur >= VAD_MAX_SECONDS:
+                    speech_trace("VAD forced stop: max duration reached")
                     break
                 if dur >= VAD_MIN_SECONDS and silence_run >= silence_needed:
+                    speech_trace("VAD END detected via silence")
                     break
     if not collected:
+        speech_trace("VAD result: empty segment")
         return np.zeros((0,), dtype=np.int16)
-    return np.concatenate(collected, axis=0)
+    total = np.concatenate(collected, axis=0)
+    speech_trace("VAD result length samples=", total.shape[0])
+    return total
 
 
 def _tts_play(text: str):
@@ -329,7 +372,8 @@ def _preparse_natural_german(utterance: str) -> dict | None:
     """
     txt = utterance.strip()
     low = txt.lower()
-    today = date.today()
+    # Nutze fixiertes Session-Datum (initialisiert beim Start)
+    today = get_session_date()
     # Email sammeln
     emails = re.findall(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", txt)
     # Dauer
@@ -433,7 +477,10 @@ def run(stop_event: threading.Event | None = None):
     if not VAD_ENABLED:
         print("[HINWEIS] VAD_ENABLED False – aktiviere für komfortable Nutzung.")
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel(GEMINI_MODEL_NAME, tools=TOOLS, system_instruction=SYSTEM_INSTRUCTION)
+    # Session Zeit initialisieren (nur einmal pro Prozess)
+    session_dt = init_session_time()
+    dynamic_system_instruction = SYSTEM_INSTRUCTION + f"\nHeutiges Datum (Europe/Berlin): {session_dt.date().isoformat()}."
+    model = genai.GenerativeModel(GEMINI_MODEL_NAME, tools=TOOLS, system_instruction=dynamic_system_instruction)
     chat = model.start_chat()
     mic_id = _pick_device(MIC_DEVICE_NAME, 'input')
     spk_id = _pick_device(SPEAKER_DEVICE_NAME, 'output')
@@ -443,6 +490,7 @@ def run(stop_event: threading.Event | None = None):
         print("[FEHLER] Kalender-OAuth nicht erfolgreich. Bitte client_secret.json prüfen oder Token löschen.")
         return
     print(GREETING_TEXT)
+    speech_trace("Session start", f"session_dt={session_dt.isoformat()}")
     # Geräte-Info nicht mehr ausgeben (Anforderung)
     # Begrüßung zuerst per TTS ausgeben (nach erfolgreichem OAuth)
     try:
@@ -463,10 +511,12 @@ def run(stop_event: threading.Event | None = None):
             history_turn +=1
             print("\n[WARTEN] Sprich jetzt...")
             seg = _record_vad_segment(mic_id, wait_timeout=SILENCE_SLICE)
+            speech_trace("Loop turn", history_turn, "raw_segment_samples=", seg.shape[0])
             if seg.size==0:
                 accumulated_silence += SILENCE_SLICE
                 if accumulated_silence >= AUTO_STOP_SILENCE_SECONDS:
                     print(f"[INFO] Automatischer Stopp nach {AUTO_STOP_SILENCE_SECONDS:.0f}s Stille.")
+                    speech_trace("Auto-stop due to silence", accumulated_silence)
                     break
                 # Kurzer Hinweis nur sparsam, um Spam zu vermeiden
                 # print("(Stille)")
@@ -478,16 +528,24 @@ def run(stop_event: threading.Event | None = None):
                 text = transcribe_audio(mono16, sample_rate=TARGET_STT_SR)
             except Exception as e:
                 print("[ERR] STT:", e)
+                speech_trace("STT error", e)
                 continue
             if not text:
                 print("(leer)")
+                speech_trace("Empty STT result")
                 continue
             print("User:", text)
+            speech_trace("User text=", text)
             if text.lower().strip() in STOP_WORDS:
                 print("Beende.")
+                speech_trace("Stop word detected – terminating")
                 break
             # Vorparser für natürliche deutsche Datums-/Zeitangaben
             parsed = _preparse_natural_german(text)
+            if parsed:
+                speech_trace("Parser hit", parsed)
+            else:
+                speech_trace("Parser miss – fallback to model")
             if parsed and parsed.get('parsed'):
                 try:
                     # Anwenden von adjust_dates_if_year_missing gewährleisten (auch wenn Jahr implizit war)
@@ -495,6 +553,8 @@ def run(stop_event: threading.Event | None = None):
                     if adj:
                         parsed['start_iso'] = ns
                         parsed['end_iso'] = ne
+                        speech_trace("Year adjusted", ns, ne)
+                    _announce_pre_creation()
                     result = create_calendar_event(
                         summary=parsed['summary'],
                         start_iso=parsed['start_iso'],
@@ -502,14 +562,23 @@ def run(stop_event: threading.Event | None = None):
                         timezone='Europe/Berlin',
                         attendees=parsed.get('attendees')
                     )
+                    speech_trace("Direct create OK", result.get('id'))
                     confirm = f"Erstellt: {result.get('summary')} {result['start']['dateTime']}"
                     print("Assistent:", confirm)
                     _tts_play(confirm)
                     continue
                 except Exception as e:
                     print("[Parser/Direct] Fehler direkte Erstellung:", e)
+                    speech_trace("Direct create error", e)
                     # Weiter zum Modell-Fallback
+            else:
+                # Dokumentiere warum kein direkter Parser-Pfad genutzt wurde
+                if parsed is None:
+                    speech_trace("Parser returned None -> model path")
+                elif not parsed.get('parsed'):
+                    speech_trace("Parser dict ohne parsed=True -> model path", parsed)
             resp = chat.send_message(text)
+            speech_trace("Model primary response recv")
             fc = _extract_function_call(resp)
             if not fc:
                 reply = sanitize_output(_safe_text(resp) or "(leer)")
@@ -518,17 +587,21 @@ def run(stop_event: threading.Event | None = None):
                     _tts_play(reply)
                 except Exception:
                     pass
+                speech_trace("No function call", reply[:120] if reply else None)
                 continue
             name, args = fc
+            speech_trace("Function call extracted", name, args)
             if name == 'check_calendar_availability':
                 if 'timezone' not in args or not args.get('timezone'):
                     args['timezone'] = 'Europe/Berlin'
                 try:
                     result = check_calendar_availability(**args)
+                    speech_trace("Availability result", result)
                     _send_function_response(chat, name, result)
                     if result.get('free'):
                         # Zeitraum frei – Modell darf ggf. direkt create_calendar_event aufrufen
                         follow = chat.send_message("Antworte gemäß System-Prompt auf Basis der Function-Response (free=true).")
+                        speech_trace("Follow after free=true received")
                     else:
                         # Zeitraum belegt – Alternativvorschläge berechnen lassen
                         alt_args = {
@@ -540,12 +613,15 @@ def run(stop_event: threading.Event | None = None):
                             alt_res = suggest_same_day_alternatives(**alt_args)
                             _send_function_response(chat, 'suggest_same_day_alternatives', alt_res)
                             follow = chat.send_message("Antworte gemäß System-Prompt: Zeitraum belegt, biete Alternativen an und frage nach Auswahl oder neuer Angabe.")
+                            speech_trace("Alternatives provided", alt_res)
                         except Exception as e:
                             follow = chat.send_message(f"Zeitraum belegt. Konnte Alternativen nicht berechnen ({e}). Bitte frage nach anderer Zeit am selben Tag.")
+                            speech_trace("Alternative calc error", e)
                     # Prüfen, ob das Follow bereits einen weiteren Function Call (z.B. create_calendar_event) enthält
                     fc2 = _extract_function_call(follow)
                     if fc2:
                         name2, args2 = fc2
+                        speech_trace("Second function call", name2, args2)
                         if name2 == 'create_calendar_event':
                             if 'timezone' not in args2 or not args2.get('timezone'):
                                 args2['timezone'] = 'Europe/Berlin'
@@ -556,12 +632,17 @@ def run(stop_event: threading.Event | None = None):
                                         args2['start_iso'] = ns
                                         args2['end_iso'] = ne
                                         chat.send_message(f"Hinweis: Jahr ergänzt -> {ns} bis {ne}.")
+                                        speech_trace("Year adjusted 2nd", ns, ne)
+                                _announce_pre_creation()
                                 result2 = create_calendar_event(**args2)
                                 _send_function_response(chat, name2, result2)
                                 follow2 = chat.send_message("Bestätige sehr knapp (Titel + Start).")
                                 confirm = sanitize_output(_safe_text(follow2) or "Termin angelegt.")
                                 print("Bestätigung:", confirm)
                                 _tts_play(confirm)
+                                speech_trace("Second create OK", result2.get('id'))
+                                # Log wichtige Felder komprimiert
+                                speech_trace("Second create summary", result2.get('summary'), result2.get('start',{}).get('dateTime'))
                             except Exception as e2:
                                 err2 = f"Fehler: {e2}"
                                 print(err2)
@@ -570,14 +651,18 @@ def run(stop_event: threading.Event | None = None):
                                     _tts_play("Fehler beim Anlegen. Bitte wiederholen.")
                                 except Exception:
                                     pass
+                                speech_trace("Second create error", e2)
+                                speech_trace("Second create error args", {k: v for k,v in args2.items() if k in ('summary','start_iso','end_iso')})
                         else:
                             # Unerwarteter Function Call: normal behandeln
                             reply = sanitize_output(_safe_text(follow) or "(keine Antwort)")
                             _tts_play(reply)
+                            speech_trace("Unexpected function call type", name2)
                     else:
                         reply = sanitize_output(_safe_text(follow) or "(keine Antwort)")
                         print("Assistent:", reply)
                         _tts_play(reply)
+                        speech_trace("No second function call", reply[:120] if reply else None)
                 except Exception as e:
                     err = f"Fehler Verfügbarkeit: {e}"
                     print(err)
@@ -586,6 +671,7 @@ def run(stop_event: threading.Event | None = None):
                         _tts_play("Fehler bei der Verfügbarkeitsprüfung.")
                     except Exception:
                         pass
+                    speech_trace("Availability error", e)
                 continue
             elif name == 'create_calendar_event':  # unterstützt jetzt location, recurrence, reminders_override_minutes, use_default_reminders
                 if 'timezone' not in args or not args.get('timezone'):
@@ -598,12 +684,16 @@ def run(stop_event: threading.Event | None = None):
                             args['start_iso'] = ns
                             args['end_iso'] = ne
                             chat.send_message(f"Hinweis: Jahr ergänzt -> {ns} bis {ne}.")
+                            speech_trace("Year adjusted direct model", ns, ne)
+                    _announce_pre_creation()
                     result = create_calendar_event(**args)
                     _send_function_response(chat, name, result)
                     follow = chat.send_message("Bestätige kurz.")
                     confirm = sanitize_output(_safe_text(follow) or "Termin angelegt.")
                     print("Bestätigung:", confirm)
                     _tts_play(confirm)
+                    speech_trace("Model create OK", result.get('id'))
+                    speech_trace("Model create summary", result.get('summary'), result.get('start',{}).get('dateTime'))
                 except Exception as e:
                     err = f"Fehler: {e}"
                     print(err)
@@ -612,6 +702,8 @@ def run(stop_event: threading.Event | None = None):
                         _tts_play("Fehler beim Anlegen. Bitte wiederholen.")
                     except Exception:
                         pass
+                    speech_trace("Model create error", e)
+                    speech_trace("Model create error args", {k: v for k,v in args.items() if k in ('summary','start_iso','end_iso')})
                 continue
                 msg = "Funktion nicht unterstützt."
                 print(msg)
