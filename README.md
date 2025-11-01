@@ -119,6 +119,57 @@ $env:GOOGLE_CALENDAR_SCOPES='https://www.googleapis.com/auth/calendar'
 
 Für Voice-Bedienung siehe `speech_calendar_assistant.py`, für textbasierte Function Calls `gemini_function_chat.py`.
 
+## Kontakte-Verwaltung (Kundendaten)
+
+Die Anwendung unterstützt die Verwaltung von Kundenkontakten mit automatischer alphabetischer Sortierung:
+
+### Funktionen
+1. Kontakt hinzufügen/aktualisieren (`add_contact`)
+2. Kontakte auflisten (`list_contacts`) - alphabetisch sortiert nach Name
+3. Kontakt suchen (`get_contact`)
+4. Kontakt löschen (`delete_contact`)
+
+### Gespeicherte Daten
+Für jeden Kontakt können gespeichert werden:
+- Name (erforderlich)
+- Telefonnummer
+- E-Mail-Adresse
+- Adresse
+- Notizen
+
+### Speicherung
+Kontakte werden in `contacts.json` gespeichert (wird automatisch erstellt).
+Die Datei wird im `.gitignore` ausgeschlossen um Kundendaten zu schützen.
+
+### Sortierung
+Alle Kontakte werden automatisch alphabetisch nach Namen sortiert angezeigt.
+Die Suche ist case-insensitive (Groß-/Kleinschreibung wird ignoriert).
+
+### Umgebungsvariable
+```powershell
+$env:CONTACTS_FILE='contacts.json'  # Standard-Pfad, optional anpassbar
+```
+
+### Beispiel-Verwendung
+```python
+from contacts import add_contact, list_contacts
+
+# Kontakt hinzufügen
+add_contact("Müller Hans", phone="0123-456789", email="hans@example.com")
+
+# Alle Kontakte anzeigen (alphabetisch sortiert)
+result = list_contacts()
+for contact in result['contacts']:
+    print(f"{contact['name']}: {contact.get('phone', 'keine Telefonnummer')}")
+```
+
+### Sprachbefehle
+Der AI-Assistent kann Kontakte per Sprachbefehl verwalten:
+- "Speichere den Kontakt Anna Schmidt mit der Telefonnummer 0123-456789"
+- "Zeige mir alle Kontakte"
+- "Suche nach Müller"
+- "Welche Telefonnummer hat Anna Schmidt?"
+
 
 ## Installation
 

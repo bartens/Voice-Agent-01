@@ -1,8 +1,8 @@
-"""Chat mit Gemini + Function Calling für Google Kalender.
+"""Chat mit Gemini + Function Calling für Google Kalender und Kontakte.
 
 Ablauf:
  - User Prompt -> Modell
- - Modell kann normalen Text oder function_call(create_calendar_event) liefern
+ - Modell kann normalen Text oder function_call (Kalender/Kontakte) liefern
  - Bei function_call: lokale Ausführung -> function_response zurück -> Modell bestätigt
 
 Start: python gemini_function_chat.py
@@ -11,8 +11,9 @@ from __future__ import annotations
 import os
 import google.generativeai as genai
 from config import GEMINI_API_KEY, GEMINI_MODEL_NAME
-from personality import SYSTEM_PROMPT_CALENDAR, SYSTEM_PROMPT_GENERAL
+from personality import SYSTEM_PROMPT_CALENDAR, SYSTEM_PROMPT_GENERAL, SYSTEM_PROMPT_CONTACTS
 from calendar_tools import create_calendar_event, list_calendar_events, check_calendar_availability, suggest_same_day_alternatives
+from contacts import add_contact, list_contacts, get_contact, delete_contact
 from text_sanitize import sanitize_output
 from date_utils import adjust_dates_if_year_missing
 import re
@@ -99,12 +100,60 @@ TOOLS = [{
                 },
                 "required": ["start_iso", "end_iso"]
             }
+        },
+        {
+            "name": "add_contact",
+            "description": "Fügt einen neuen Kundenkontakt hinzu oder aktualisiert einen bestehenden.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name des Kunden (erforderlich)."},
+                    "phone": {"type": "string", "description": "Telefonnummer."},
+                    "email": {"type": "string", "description": "E-Mail-Adresse."},
+                    "address": {"type": "string", "description": "Adresse."},
+                    "notes": {"type": "string", "description": "Notizen zum Kunden."}
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "list_contacts",
+            "description": "Listet alle Kundenkontakte alphabetisch sortiert auf.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "search": {"type": "string", "description": "Optionaler Suchbegriff zum Filtern nach Name."}
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "get_contact",
+            "description": "Ruft die Details eines bestimmten Kundenkontakts ab.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name des Kunden."}
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "delete_contact",
+            "description": "Löscht einen Kundenkontakt.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name des zu löschenden Kunden."}
+                },
+                "required": ["name"]
+            }
         }
     ]
 }]
 
-# Kombiniere allgemeine Persona mit dem kalender-spezifischen Tool-Prompt
-SYSTEM_INSTRUCTION = SYSTEM_PROMPT_GENERAL + "\n\n" + SYSTEM_PROMPT_CALENDAR
+# Kombiniere allgemeine Persona mit dem kalender- und kontakt-spezifischen Tool-Prompt
+SYSTEM_INSTRUCTION = SYSTEM_PROMPT_GENERAL + "\n\n" + SYSTEM_PROMPT_CALENDAR + "\n\n" + SYSTEM_PROMPT_CONTACTS
 
 # Modell/Chat werden nun erst bei erstem handle_user_message()-Aufruf erstellt.
 
@@ -252,6 +301,14 @@ def handle_user_message(text: str) -> str:
             if 'timezone' not in args or not args.get('timezone'):
                 args['timezone'] = 'Europe/Berlin'
             result = suggest_same_day_alternatives(**args)
+        elif name == "add_contact":
+            result = add_contact(**args)
+        elif name == "list_contacts":
+            result = list_contacts(**args)
+        elif name == "get_contact":
+            result = get_contact(**args)
+        elif name == "delete_contact":
+            result = delete_contact(**args)
         else:
             _send_function_response(_CHAT, name, {"error": f"Unbekannte Funktion {name}"})
             return f"Nicht unterstützte Funktion: {name}"
