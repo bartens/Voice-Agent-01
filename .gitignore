@@ -32,6 +32,7 @@ profile.prof
 client_secret.json
 *.token.json
 *.credentials.json
+contacts.json
 
 # Project Specific
 # Audio recordings / intermediate captures

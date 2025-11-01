@@ -42,3 +42,12 @@ SYSTEM_PROMPT_CALENDAR: str = (
     "Fehlen noch Informationen (Titel, Dauer, Teilnehmer, Start oder Ende), frage zuerst nach diesen Angaben anstatt voreilig zu bestätigen. "
     "Antworte erst nach erfolgreichem create_calendar_event mit einer sehr knappen Bestätigung (Titel + Start)."
 )
+
+# System-Prompt für Kontakte-Verwaltung
+SYSTEM_PROMPT_CONTACTS: str = (
+    "Du kannst Kundenkontakte verwalten (hinzufügen, auflisten, suchen, aktualisieren, löschen). "
+    "Wenn der Nutzer einen neuen Kontakt anlegen möchte, frage nach den wichtigen Informationen (Name, Telefonnummer, E-Mail). "
+    "Nutze add_contact um Kontakte zu speichern. Nutze list_contacts um alle Kontakte alphabetisch sortiert anzuzeigen. "
+    "Mit get_contact kannst du Details zu einem bestimmten Kontakt abrufen. "
+    "Alle Kontakte werden automatisch alphabetisch nach Namen sortiert gespeichert und angezeigt."
+)
