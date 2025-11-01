@@ -59,22 +59,25 @@ def add_contact(name: str, phone: Optional[str] = None, email: Optional[str] = N
     contacts = _load_contacts()
     name_key = name.strip().lower()
     
+    # Check if updating existing contact
+    is_update = name_key in contacts
+    
     # Create or update contact
     contact = contacts.get(name_key, {})
     contact["name"] = name.strip()
-    if phone is not None:
+    if phone is not None and isinstance(phone, str):
         contact["phone"] = phone.strip()
-    if email is not None:
+    if email is not None and isinstance(email, str):
         contact["email"] = email.strip()
-    if address is not None:
+    if address is not None and isinstance(address, str):
         contact["address"] = address.strip()
-    if notes is not None:
+    if notes is not None and isinstance(notes, str):
         contact["notes"] = notes.strip()
     
     contacts[name_key] = contact
     _save_contacts(contacts)
     
-    action = "aktualisiert" if name_key in contacts else "hinzugefügt"
+    action = "aktualisiert" if is_update else "hinzugefügt"
     return {
         "success": True,
         "message": f"Kontakt {contact['name']} {action}",
